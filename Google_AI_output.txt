@@ -1,0 +1,5 @@
+Google AI Response
+Source File: C:/Users/USER/.vscode/temp3.md
+============================================================
+
+API ERROR: Chats.create() got an unexpected keyword argument 'input'
