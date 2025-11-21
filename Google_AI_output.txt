@@ -1,5 +1,5 @@
 Google AI Response
-Source File: C:/Users/USER/.vscode/temp3.md
+Source File: C:/Users/USER/.vscode/vuln_scan/gemini-scan.py
 ============================================================
 
-API ERROR: Chats.create() got an unexpected keyword argument 'input'
+API ERROR: 404 NOT_FOUND. {'error': {'code': 404, 'message': 'models/gemini-1.5-flash is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}}
