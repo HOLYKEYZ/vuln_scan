@@ -14,10 +14,11 @@ from dotenv import load_dotenv
 # ---------------------------------------------------------------
 
 load_dotenv()
-API_KEY = os.getenv("GOOGLE_API_KEY")
+API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GROQ_KEY")
+
 
 if not API_KEY:
-    raise Exception("❌ GOOGLE_API_KEY not set in .env file")
+    raise Exception("❌ Neither GOOGLE_API_KEY nor GROQ_KEY is set in .env file")
 
 MODEL_NAME = "gemini-1.5-flash"
 OUTPUT_FILE = "Google_AI_output.txt"
