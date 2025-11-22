@@ -6,7 +6,7 @@
 import os
 import tkinter as tk
 from tkinter import filedialog
-from google import genai
+import google.generativeai as genai
 from dotenv import load_dotenv
 
 # ---------------------------------------------------------------
@@ -23,8 +23,8 @@ if not API_KEY:
 MODEL_NAME = "gemini-1.5-flash"
 OUTPUT_FILE = "Google_AI_output.txt"
 
-# Initialize client
-client = genai.Client(api_key=API_KEY)
+# Configure genai
+genai.configure(api_key=API_KEY)
 
 
 # ---------------------------------------------------------------
@@ -70,17 +70,13 @@ def read_file(path):
 # ---------------------------------------------------------------
 def process_with_google(system_prompt, user_prompt, file_content):
     try:
-        # STEP 1: Create chat session with system prompt only
-        chat = client.chats.create(
-            model=MODEL_NAME,
-            config={"system_instruction": system_prompt}
+        model = genai.GenerativeModel(
+            MODEL_NAME,
+            system_instruction=system_prompt
         )
-
-        # STEP 2: Send the actual user message (this returns model output)
         message_text = f"{user_prompt}\n\n------ FILE CONTENT BELOW ------\n{file_content}"
-        response = chat.send_message(message_text)
+        response = model.generate_content(message_text)
 
-        # STEP 3: Extract response text safely
         if hasattr(response, "text"):
             return response.text
         return "❌ Model returned no text."
