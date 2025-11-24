@@ -3,10 +3,10 @@ LLM Providers using only requests - NO SDK REQUIRED
 This single file REPLACES the entire providers/ folder.
 
 Just set your API keys as environment variables:
-    GOOGLE_API_KEY or GEMINI_KEY   - for Gemini
+    GOOGLE_API_KEY                  - for Gemini
     OPENAI_API_KEY                  - for OpenAI
     ANTHROPIC_API_KEY or CLAUDE_KEY - for Claude  
-    GROQ_API_KEY                    - for Groq
+    GROQ_KEY                    - for Groq
     OPENROUTER_API_KEY              - for OpenRouter
 
 Or pass api_key directly to the provider constructor.
@@ -40,9 +40,9 @@ class GeminiProvider(LLMProvider):
     API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
-        self.api_key = api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_KEY")
+        self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
         if not self.api_key:
-            raise ValueError("GOOGLE_API_KEY or GEMINI_KEY required")
+            raise ValueError("GOOGLE_API_KEY required")
         
         # Use gemini-1.5-flash or gemini-pro
         self.model = model or os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
@@ -209,9 +209,9 @@ class GroqProvider(LLMProvider):
     API_URL = "https://api.groq.com/openai/v1/chat/completions"
     
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
-        self.api_key = api_key or os.getenv("GROQ_KEY") or os.getenv("GROQ_KEY")
+        self.api_key = api_key or os.getenv("GROQ_KEY")
         if not self.api_key:
-            raise ValueError("GROQ_API_KEY required")
+            raise ValueError("GROQ_KEY required")
         
         self.model = model or os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")
     
@@ -366,5 +366,3 @@ def load_provider(name: str, **kwargs) -> LLMProvider:
 def list_providers() -> list:
     """List available providers"""
     return list(PROVIDERS.keys())
-
-    

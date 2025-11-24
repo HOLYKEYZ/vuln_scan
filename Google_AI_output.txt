@@ -1,5 +1,16 @@
-Google AI Response
-Source File: C:/Users/USER/.vscode/w.py
+============================================================
+GEMINI AI ANALYSIS
 ============================================================
 
-API ERROR: 404 models/gemini-1.5-flash is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Source File: C:/Users/USER/.vscode/w.py
+Analyzed: w.py
+------------------------------------------------------------
+
+❌ All 7 models failed.
+
+Last error: gemini-pro: Connection error
+
+Try these fixes:
+1. Check your API key is valid
+2. Check your internet connection
+3. Visit https://makersuite.google.com/app/apikey to verify your key
