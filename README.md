@@ -349,12 +349,6 @@ def get_user():
 
 MIT License - See LICENSE file for details
 
-## Support
-
-- 🐛 Report bugs: [GitHub Issues](https://github.com/HOLYKEYZ/vuln_scan/issues)
-- 💬 Discussions: [GitHub Discussions](https://github.com/HOLYKEYZ/vuln_scan/discussions)
-- 📧 Email: your.email@example.com
-
 ## Acknowledgments
 
 - AST-based detection inspired by Bandit and Semgrep
