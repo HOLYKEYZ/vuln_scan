@@ -1,224 +1,421 @@
 """
-Scanner Main Module - Ties together AST scanner + LLM providers
+LLM Providers using only requests - NO SDK REQUIRED
+Fixed with auto-model discovery for Gemini
+
+Set your API keys as environment variables:
+    GOOGLE_API_KEY                  - for Gemini
+    OPENAI_API_KEY                  - for OpenAI
+    ANTHROPIC_API_KEY or CLAUDE_KEY - for Claude  
+    GROQ_KEY                        - for Groq
+    OPENROUTER_API_KEY              - for OpenRouter
 """
 
 import os
-import sys
+import requests
 import json
-import re
-from typing import Dict, Any, Optional, List
+from typing import Optional, Dict, Any, List
+from abc import ABC, abstractmethod
 
-# Import the AST scanner
-try:
-    from large_scanner import scan_file as ast_scan_file, scan_path as ast_scan_path
-    HAS_AST_SCANNER = True
-except ImportError:
-    HAS_AST_SCANNER = False
-    print("Warning: large_scanner.py not found - AST scanning disabled")
+class LLMProvider(ABC):
+    """Base class for all LLM providers"""
+    
+    @abstractmethod
+    def ask(self, system_prompt: str, user_prompt: str, context: str = "") -> str:
+        """Send a prompt and get a response"""
+        pass
+    
+    def _build_prompt(self, system: str, user: str, context: str) -> str:
+        """Helper to build full prompt"""
+        parts = [system, user]
+        if context:
+            parts.append(f"\n--- FILE CONTENT ---\n{context}")
+        return "\n\n".join(parts)
 
-# Import LLM providers
-try:
-    from providers import load_provider, list_providers, LLMProvider
-    HAS_PROVIDERS = True
-except ImportError:
-    HAS_PROVIDERS = False
-    print("Warning: providers.py not found - LLM analysis disabled")
+
+class GeminiProvider(LLMProvider):
+    """Google Gemini API - requests only with auto-model discovery"""
+    
+    API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    LIST_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+    
+    # Fallback models if auto-discovery fails
+    FALLBACK_MODELS = [
+        "gemini-1.5-flash-002",
+        "gemini-1.5-flash-001",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro-002",
+        "gemini-1.5-pro-001",
+        "gemini-1.5-pro",
+    ]
+    
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+        self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
+        if not self.api_key:
+            raise ValueError("GOOGLE_API_KEY required")
+        
+        # If model specified, use it. Otherwise auto-discover
+        if model:
+            self.models = [model]
+        else:
+            self.models = self._discover_models() or self.FALLBACK_MODELS
+    
+    def _discover_models(self) -> List[str]:
+        """Auto-discover available models from Google API"""
+        try:
+            resp = requests.get(
+                f"{self.LIST_URL}?key={self.api_key}",
+                timeout=10
+            )
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                models = []
+                
+                for m in data.get("models", []):
+                    name = m.get("name", "").replace("models/", "")
+                    methods = m.get("supportedGenerationMethods", [])
+                    
+                    # Only use models that support generateContent
+                    if "generateContent" in methods:
+                        models.append(name)
+                
+                # Sort by preference (flash first, then pro)
+                models.sort(key=lambda x: (
+                    0 if "flash" in x else 1,
+                    1 if "latest" in x else 0
+                ))
+                
+                return models
+            
+        except Exception:
+            pass
+        
+        return []
+    
+    def ask(self, system_prompt: str, user_prompt: str, context: str = "") -> str:
+        # Build the prompt
+        full_prompt = self._build_prompt(system_prompt, user_prompt, context)
+        
+        payload = {
+            "contents": [{
+                "parts": [{"text": full_prompt}]
+            }],
+            "generationConfig": {
+                "temperature": 0.7,
+                "maxOutputTokens": 8192
+            }
+        }
+        
+        # Add system instruction if supported
+        if system_prompt:
+            payload["systemInstruction"] = {
+                "parts": [{"text": system_prompt}]
+            }
+        
+        # Try each available model
+        last_error = None
+        for model in self.models:
+            url = self.API_URL.format(model=model)
+            
+            try:
+                resp = requests.post(
+                    f"{url}?key={self.api_key}",
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                    timeout=120
+                )
+                
+                if resp.status_code == 200:
+                    data = resp.json()
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        content = candidates[0].get("content", {})
+                        parts = content.get("parts", [])
+                        if parts:
+                            text = parts[0].get("text", "")
+                            if text:
+                                return text
+                
+                # Try next model
+                last_error = f"{model}: {resp.status_code}"
+                
+            except requests.exceptions.Timeout:
+                last_error = f"{model}: Timeout"
+            except Exception as e:
+                last_error = f"{model}: {str(e)}"
+        
+        # All models failed
+        return f"Gemini Error: All models failed. Last: {last_error}"
 
 
-# =============================================================================
-# LLM SECURITY ANALYSIS
-# =============================================================================
+class OpenAIProvider(LLMProvider):
+    """OpenAI API - requests only"""
+    
+    API_URL = "https://api.openai.com/v1/chat/completions"
+    
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY")
+        if not self.api_key:
+            raise ValueError("OPENAI_API_KEY required")
+        
+        self.model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    
+    def ask(self, system_prompt: str, user_prompt: str, context: str = "") -> str:
+        messages = []
+        
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        
+        user_content = user_prompt
+        if context:
+            user_content += f"\n\n--- FILE CONTENT ---\n{context}"
+        
+        messages.append({"role": "user", "content": user_content})
+        
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.7,
+            "max_tokens": 4096
+        }
+        
+        try:
+            resp = requests.post(
+                self.API_URL,
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                },
+                timeout=120
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            
+            choices = data.get("choices", [])
+            if choices:
+                return choices[0].get("message", {}).get("content", "No response")
+            
+            return f"Unexpected response: {json.dumps(data)[:500]}"
+            
+        except requests.exceptions.HTTPError as e:
+            return f"API Error {resp.status_code}: {resp.text[:500]}"
+        except Exception as e:
+            return f"Error: {str(e)}"
 
-SECURITY_SYSTEM_PROMPT = """You are an expert security code reviewer. Analyze Python code for SQL injection vulnerabilities.
 
-Output JSON only:
-{
-  "findings": [
-    {"line": <num>, "severity": "Critical|High|Medium|Low", "message": "<description>", "code": "<snippet>", "remediation": "<fix>"}
-  ],
-  "summary": "<brief assessment>"
+class ClaudeProvider(LLMProvider):
+    """Anthropic Claude API - requests only"""
+    
+    API_URL = "https://api.anthropic.com/v1/messages"
+    
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_KEY")
+        if not self.api_key:
+            raise ValueError("ANTHROPIC_API_KEY or CLAUDE_KEY required")
+        
+        self.model = model or os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
+    
+    def ask(self, system_prompt: str, user_prompt: str, context: str = "") -> str:
+        user_content = user_prompt
+        if context:
+            user_content += f"\n\n--- FILE CONTENT ---\n{context}"
+        
+        payload = {
+            "model": self.model,
+            "max_tokens": 4096,
+            "messages": [{"role": "user", "content": user_content}]
+        }
+        
+        if system_prompt:
+            payload["system"] = system_prompt
+        
+        try:
+            resp = requests.post(
+                self.API_URL,
+                json=payload,
+                headers={
+                    "x-api-key": self.api_key,
+                    "anthropic-version": "2023-06-01",
+                    "Content-Type": "application/json"
+                },
+                timeout=120
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            
+            content = data.get("content", [])
+            if content:
+                return content[0].get("text", "No response")
+            
+            return f"Unexpected response: {json.dumps(data)[:500]}"
+            
+        except requests.exceptions.HTTPError as e:
+            return f"API Error {resp.status_code}: {resp.text[:500]}"
+        except Exception as e:
+            return f"Error: {str(e)}"
+
+
+class GroqProvider(LLMProvider):
+    """Groq API - requests only"""
+    
+    API_URL = "https://api.groq.com/openai/v1/chat/completions"
+    
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+        self.api_key = api_key or os.getenv("GROQ_KEY")
+        if not self.api_key:
+            raise ValueError("GROQ_KEY required")
+        
+        self.model = model or os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")
+    
+    def ask(self, system_prompt: str, user_prompt: str, context: str = "") -> str:
+        messages = []
+        
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        
+        user_content = user_prompt
+        if context:
+            user_content += f"\n\n--- FILE CONTENT ---\n{context}"
+        
+        messages.append({"role": "user", "content": user_content})
+        
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.7,
+            "max_tokens": 4096
+        }
+        
+        try:
+            resp = requests.post(
+                self.API_URL,
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                },
+                timeout=120
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            
+            choices = data.get("choices", [])
+            if choices:
+                return choices[0].get("message", {}).get("content", "No response")
+            
+            return f"Unexpected response: {json.dumps(data)[:500]}"
+            
+        except requests.exceptions.HTTPError as e:
+            return f"API Error {resp.status_code}: {resp.text[:500]}"
+        except Exception as e:
+            return f"Error: {str(e)}"
+
+
+class OllamaProvider(LLMProvider):
+    """Ollama local API - requests only"""
+    
+    def __init__(self, host: Optional[str] = None, model: Optional[str] = None):
+        self.host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        self.model = model or os.getenv("OLLAMA_MODEL", "llama3")
+    
+    def ask(self, system_prompt: str, user_prompt: str, context: str = "") -> str:
+        full_prompt = self._build_prompt(system_prompt, user_prompt, context)
+        
+        payload = {
+            "model": self.model,
+            "prompt": full_prompt,
+            "stream": False
+        }
+        
+        try:
+            resp = requests.post(
+                f"{self.host}/api/generate",
+                json=payload,
+                timeout=300
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            
+            return data.get("response", f"Unexpected: {json.dumps(data)[:500]}")
+            
+        except Exception as e:
+            return f"Error: {str(e)}"
+
+
+class OpenRouterProvider(LLMProvider):
+    """OpenRouter API - access multiple models"""
+    
+    API_URL = "https://openrouter.ai/api/v1/chat/completions"
+    
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER_KEY")
+        if not self.api_key:
+            raise ValueError("OPENROUTER_API_KEY required")
+        
+        self.model = model or os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free")
+    
+    def ask(self, system_prompt: str, user_prompt: str, context: str = "") -> str:
+        messages = []
+        
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        
+        user_content = user_prompt
+        if context:
+            user_content += f"\n\n--- FILE CONTENT ---\n{context}"
+        
+        messages.append({"role": "user", "content": user_content})
+        
+        payload = {
+            "model": self.model,
+            "messages": messages
+        }
+        
+        try:
+            resp = requests.post(
+                self.API_URL,
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                },
+                timeout=120
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            
+            choices = data.get("choices", [])
+            if choices:
+                return choices[0].get("message", {}).get("content", "No response")
+            
+            return f"Unexpected response: {json.dumps(data)[:500]}"
+            
+        except requests.exceptions.HTTPError as e:
+            return f"API Error {resp.status_code}: {resp.text[:500]}"
+        except Exception as e:
+            return f"Error: {str(e)}"
+
+
+# Provider registry
+PROVIDERS = {
+    "gemini": GeminiProvider,
+    "openai": OpenAIProvider,
+    "claude": ClaudeProvider,
+    "groq": GroqProvider,
+    "ollama": OllamaProvider,
+    "openrouter": OpenRouterProvider,
 }
 
-Focus on: f-strings with SQL, .format(), % formatting, string concatenation, request.args/form/headers in SQL, weak sanitization (.replace, .strip)."""
+
+def load_provider(name: str, **kwargs) -> LLMProvider:
+    """Load a provider by name"""
+    name = name.lower()
+    if name not in PROVIDERS:
+        raise ValueError(f"Unknown provider: {name}. Available: {list(PROVIDERS.keys())}")
+    return PROVIDERS[name](**kwargs)
 
 
-def analyze_with_llm(code: str, filename: str, provider) -> Dict[str, Any]:
-    """Analyze code using LLM"""
-    user_prompt = f"Analyze this file for SQL injection: {filename}\n\n```python\n{code}\n```"
-    
-    response = provider.ask(SECURITY_SYSTEM_PROMPT, user_prompt, "")
-    findings = []
-    
-    try:
-        # Extract JSON
-        json_match = re.search(r'\{[\s\S]*\}', response)
-        if json_match:
-            data = json.loads(json_match.group())
-            for f in data.get("findings", []):
-                findings.append({
-                    "file": filename, "line": f.get("line", 0), "col": 0,
-                    "rule": "LLM-SQLI", "message": f.get("message", ""),
-                    "severity": f.get("severity", "Medium"),
-                    "confidence": "Medium", "code": f.get("code", ""),
-                    "remediation": f.get("remediation", "Use parameterized queries"),
-                    "source": "llm"
-                })
-    except json.JSONDecodeError:
-        if "sql injection" in response.lower() or "vulnerability" in response.lower():
-            findings.append({
-                "file": filename, "line": 0, "col": 0, "rule": "LLM-REVIEW",
-                "message": f"LLM detected issues: {response[:200]}...",
-                "severity": "Medium", "confidence": "Low", "source": "llm"
-            })
-    
-    return {"findings": findings, "raw_response": response}
-
-
-# =============================================================================
-# UNIFIED SCANNING
-# =============================================================================
-
-def scan_file(path: str, provider_name: str = None, api_key: str = None,
-              ast_only: bool = False, llm_only: bool = False) -> Dict[str, Any]:
-    """Scan a file for SQL injection vulnerabilities."""
-    results = {
-        "findings": [],
-        "statistics": {
-            "files_scanned": 1, "total_findings": 0,
-            "by_severity": {}, "by_rule": {},
-            "by_source": {"ast": 0, "llm": 0}
-        }
-    }
-    
-    # Read file
-    try:
-        with open(path, "r", encoding="utf-8", errors="ignore") as f:
-            code = f.read()
-    except Exception as e:
-        results["findings"].append({"file": path, "line": 0, "rule": "SCAN-ERROR",
-                                    "message": f"Failed to read: {e}", "severity": "Info"})
-        return results
-    
-    # AST Analysis
-    if not llm_only and HAS_AST_SCANNER:
-        ast_results = ast_scan_file(path)
-        for f in ast_results.get("findings", []):
-            f["source"] = "ast"
-            results["findings"].append(f)
-        results["statistics"]["by_source"]["ast"] = len(ast_results.get("findings", []))
-    
-    # LLM Analysis
-    if not ast_only and provider_name and HAS_PROVIDERS:
-        try:
-            kwargs = {"api_key": api_key} if api_key else {}
-            provider = load_provider(provider_name, **kwargs)
-            llm_results = analyze_with_llm(code, path, provider)
-            for f in llm_results.get("findings", []):
-                results["findings"].append(f)
-            results["statistics"]["by_source"]["llm"] = len(llm_results.get("findings", []))
-            results["llm_response"] = llm_results.get("raw_response", "")
-        except Exception as e:
-            results["findings"].append({"file": path, "line": 0, "rule": "LLM-ERROR",
-                                        "message": f"LLM failed: {e}", "severity": "Info", "source": "llm"})
-    
-    # Deduplicate
-    seen = set()
-    unique = []
-    for f in results["findings"]:
-        key = (f.get("file"), f.get("line"), f.get("rule", "")[:8])
-        if key not in seen:
-            seen.add(key)
-            unique.append(f)
-    results["findings"] = unique
-    
-    # Update stats
-    results["statistics"]["total_findings"] = len(results["findings"])
-    for f in results["findings"]:
-        sev = f.get("severity", "Unknown")
-        rule = f.get("rule", "Unknown")
-        results["statistics"]["by_severity"][sev] = results["statistics"]["by_severity"].get(sev, 0) + 1
-        results["statistics"]["by_rule"][rule] = results["statistics"]["by_rule"].get(rule, 0) + 1
-    
-    return results
-
-
-def scan_path(path: str, provider_name: str = None, api_key: str = None,
-              ast_only: bool = False, llm_only: bool = False) -> Dict[str, Any]:
-    """Scan a file or directory."""
-    if os.path.isfile(path):
-        return scan_file(path, provider_name, api_key, ast_only, llm_only)
-    
-    results = {
-        "findings": [],
-        "statistics": {"files_scanned": 0, "total_findings": 0,
-                       "by_severity": {}, "by_rule": {}, "by_source": {"ast": 0, "llm": 0}}
-    }
-    
-    for root, dirs, files in os.walk(path):
-        dirs[:] = [d for d in dirs if d not in {'.git', '__pycache__', 'node_modules', '.venv', 'venv'}]
-        for fname in files:
-            if fname.endswith('.py'):
-                fpath = os.path.join(root, fname)
-                file_results = scan_file(fpath, provider_name, api_key, ast_only, llm_only)
-                results["findings"].extend(file_results.get("findings", []))
-                results["statistics"]["files_scanned"] += 1
-                for sev, cnt in file_results.get("statistics", {}).get("by_severity", {}).items():
-                    results["statistics"]["by_severity"][sev] = results["statistics"]["by_severity"].get(sev, 0) + cnt
-                for rule, cnt in file_results.get("statistics", {}).get("by_rule", {}).items():
-                    results["statistics"]["by_rule"][rule] = results["statistics"]["by_rule"].get(rule, 0) + cnt
-                results["statistics"]["by_source"]["ast"] += file_results.get("statistics", {}).get("by_source", {}).get("ast", 0)
-                results["statistics"]["by_source"]["llm"] += file_results.get("statistics", {}).get("by_source", {}).get("llm", 0)
-    
-    results["statistics"]["total_findings"] = len(results["findings"])
-    return results
-
-
-def main():
-    import argparse
-    parser = argparse.ArgumentParser(description="SQL Injection Scanner")
-    parser.add_argument("path", help="File or directory to scan")
-    parser.add_argument("--provider", "-p", choices=["gemini", "openai", "claude", "groq"], help="LLM provider")
-    parser.add_argument("--api-key", "-k", help="API key")
-    parser.add_argument("--ast-only", action="store_true", help="AST analysis only")
-    parser.add_argument("--llm-only", action="store_true", help="LLM analysis only")
-    parser.add_argument("--output", "-o", help="Output JSON file")
-    parser.add_argument("--verbose", "-v", action="store_true")
-    args = parser.parse_args()
-    
-    if not os.path.exists(args.path):
-        print(f"Error: Path not found: {args.path}")
-        sys.exit(1)
-    
-    print(f"Scanning: {args.path}")
-    if args.provider:
-        print(f"Using LLM: {args.provider}")
-    
-    results = scan_path(args.path, args.provider, args.api_key, args.ast_only, args.llm_only)
-    stats = results["statistics"]
-    
-    print(f"\n{'='*50}\nSCAN COMPLETE\n{'='*50}")
-    print(f"Files: {stats['files_scanned']} | Findings: {stats['total_findings']}")
-    print(f"  AST: {stats['by_source']['ast']} | LLM: {stats['by_source']['llm']}")
-    
-    if stats["by_severity"]:
-        print("\nSeverity:", " | ".join(f"{k}: {v}" for k, v in stats["by_severity"].items()))
-    
-    if results["findings"]:
-        print(f"\n{'='*50}\nFINDINGS\n{'='*50}")
-        for i, f in enumerate(results["findings"], 1):
-            print(f"\n[{i}] [{f.get('severity')}] {f.get('rule')}")
-            print(f"    {f.get('file')}:{f.get('line')}")
-            print(f"    {f.get('message', '')[:100]}")
-    else:
-        print("\n✅ No vulnerabilities found!")
-    
-    if args.output:
-        with open(args.output, "w") as f:
-            json.dump(results, f, indent=2)
-        print(f"\nSaved: {args.output}")
-    
-    sys.exit(1 if any(f.get("severity") in ("Critical", "High") for f in results["findings"]) else 0)
-
-
-if __name__ == "__main__":
-    main()
+def list_providers() -> list:
+    """List available providers"""
+    return list(PROVIDERS.keys())

@@ -2,13 +2,13 @@
 GEMINI AI ANALYSIS
 ============================================================
 
-Source File: C:/Users/USER/.vscode/w.py
-Analyzed: w.py
+Source File: C:/Users/USER/.vscode/vuln8.py
+Analyzed: vuln8.py
 ------------------------------------------------------------
 
 ❌ All 7 models failed.
 
-Last error: gemini-pro: Connection error
+Last error: gemini-pro: 404 - models/gemini-pro is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
 
 Try these fixes:
 1. Check your API key is valid
