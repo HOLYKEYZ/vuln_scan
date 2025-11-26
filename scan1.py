@@ -22,7 +22,7 @@ except ImportError:
 # CONFIG
 # =============================================================================
 
-API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_KEY")
+API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GROQ_KEY")
 
 # Updated fallback models (will try auto-discovery first)
 FALLBACK_MODELS = [
