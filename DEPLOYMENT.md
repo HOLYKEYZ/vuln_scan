@@ -81,11 +81,12 @@ If you prefer not to use the Blueprint:
 ## Testing Your Deployment
 
 1. Visit your Render URL
-2. Upload a Python file (you can use any `.py` file from this project)
+2. Upload a file (Drag & Drop supported!)
+   - **Supported Languages:** Python (.py), JavaScript (.js), TypeScript (.ts), Java, PHP, Go, Ruby, C/C++, C#
 3. Select analysis mode:
-   - **AST Static Analysis** - Works without API keys
-   - **LLM Deep Analysis** - Requires API key
-   - **Hybrid** - Best results (requires API key)
+   - **Static Analysis (AST)** - Python only (fast, no API key needed)
+   - **LLM Deep Analysis** - All languages (requires API key)
+   - **Hybrid** - Best coverage for Python
 4. Click "INITIATE SCAN"
 5. Review the results
 

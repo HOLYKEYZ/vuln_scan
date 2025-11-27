@@ -15,6 +15,13 @@ sys.path.insert(0, str(parent_dir))
 
 from flask import Flask, request, render_template_string, jsonify
 
+# Try to load .env file if available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not installed, will use system environment variables
+
 # Import from parent directory
 try:
     from providers import load_provider, list_providers
@@ -42,7 +49,7 @@ HTML_TEMPLATE = """<!doctype html>
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>SQL Injection Scanner</title>
+    <title>Vulnerability Scanner</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2358a6ff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'/></svg>">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
@@ -114,6 +121,8 @@ HTML_TEMPLATE = """<!doctype html>
             padding: 24px;
             margin-bottom: 24px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            position: relative;
+            overflow: hidden;
         }
 
         .section-title {
@@ -129,16 +138,29 @@ HTML_TEMPLATE = """<!doctype html>
         .upload-area {
             border: 2px dashed var(--border-color);
             border-radius: 6px;
-            padding: 40px;
+            padding: 60px 40px;
             text-align: center;
-            transition: all 0.2s;
+            transition: all 0.3s ease;
             cursor: pointer;
             background: rgba(255,255,255,0.02);
+            position: relative;
         }
 
-        .upload-area:hover {
+        .upload-area.dragover {
             border-color: var(--accent-color);
-            background: rgba(88, 166, 255, 0.05);
+            background: rgba(88, 166, 255, 0.1);
+            transform: scale(1.02);
+        }
+
+        .upload-icon {
+            font-size: 3em;
+            margin-bottom: 15px;
+            color: var(--text-secondary);
+            transition: color 0.3s;
+        }
+
+        .upload-area:hover .upload-icon, .upload-area.dragover .upload-icon {
+            color: var(--accent-color);
         }
 
         input[type="file"] {
@@ -147,14 +169,20 @@ HTML_TEMPLATE = """<!doctype html>
 
         .file-label {
             display: block;
-            font-size: 1.1em;
+            font-size: 1.2em;
             color: var(--text-primary);
             cursor: pointer;
+            margin-bottom: 10px;
         }
 
         .file-label span {
             color: var(--accent-color);
             font-weight: 600;
+        }
+        
+        .file-hint {
+            font-size: 0.9em;
+            color: var(--text-secondary);
         }
 
         .form-row {
@@ -195,20 +223,28 @@ HTML_TEMPLATE = """<!doctype html>
 
         button[type="submit"] {
             width: 100%;
-            padding: 12px;
+            padding: 14px;
             margin-top: 20px;
             background: var(--success-color);
             color: white;
             border: 1px solid rgba(255,255,255,0.1);
             border-radius: 6px;
-            font-size: 1em;
+            font-size: 1.1em;
             font-weight: 600;
             cursor: pointer;
-            transition: background 0.2s;
+            transition: all 0.2s;
+            position: relative;
+            overflow: hidden;
         }
 
         button[type="submit"]:hover {
             background: #2ea043;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(35, 134, 54, 0.4);
+        }
+        
+        button[type="submit"]:active {
+            transform: translateY(0);
         }
 
         .stats-grid {
@@ -224,6 +260,11 @@ HTML_TEMPLATE = """<!doctype html>
             border-radius: 6px;
             padding: 15px;
             text-align: center;
+            transition: transform 0.2s;
+        }
+        
+        .stat-box:hover {
+            transform: translateY(-2px);
         }
 
         .stat-number {
@@ -251,6 +292,11 @@ HTML_TEMPLATE = """<!doctype html>
             border-radius: 6px;
             margin-bottom: 16px;
             overflow: hidden;
+            transition: border-color 0.2s;
+        }
+        
+        .finding-card:hover {
+            border-color: var(--text-secondary);
         }
 
         .finding-header {
@@ -342,6 +388,54 @@ HTML_TEMPLATE = """<!doctype html>
             margin-top: 40px;
         }
         
+        /* Loading Overlay */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(13, 17, 23, 0.9);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            flex-direction: column;
+        }
+        
+        .scanner-animation {
+            width: 200px;
+            height: 4px;
+            background: #30363d;
+            border-radius: 2px;
+            position: relative;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        
+        .scanner-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            width: 30%;
+            background: var(--accent-color);
+            box-shadow: 0 0 10px var(--accent-color);
+            animation: scan 1.5s ease-in-out infinite;
+        }
+        
+        @keyframes scan {
+            0% { left: -30%; }
+            100% { left: 100%; }
+        }
+        
+        .loading-text {
+            color: var(--accent-color);
+            font-family: var(--font-mono);
+            font-size: 1.2em;
+            letter-spacing: 2px;
+        }
+        
         /* Custom Scrollbar */
         ::-webkit-scrollbar {
             width: 8px;
@@ -360,6 +454,13 @@ HTML_TEMPLATE = """<!doctype html>
     </style>
 </head>
 <body>
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="scanner-animation">
+            <div class="scanner-bar"></div>
+        </div>
+        <div class="loading-text">SCANNING ARTIFACTS...</div>
+    </div>
+
     <div class="container">
         <header>
             <h1>
@@ -374,27 +475,29 @@ HTML_TEMPLATE = """<!doctype html>
                 </svg>
                 Vulnerability Scanner
             </h1>
-            <p>Advanced SQL Injection & Vulnerability Scanner</p>
+            <p>Advanced Multi-Language Security Analysis</p>
         </header>
         
         <div class="card">
-            <form method="post" enctype="multipart/form-data">
-                <div class="upload-area" onclick="document.getElementById('file').click()">
-                    <input type="file" id="file" name="file" accept=".py" required onchange="document.getElementById('file-name').textContent = this.files[0].name">
+            <form method="post" enctype="multipart/form-data" id="scanForm">
+                <div class="upload-area" id="dropZone">
+                    <input type="file" id="file" name="file" required>
+                    <div class="upload-icon">📂</div>
                     <label class="file-label">
-                        Drop your Python file here or <span>browse</span>
+                        Drag & drop file here or <span>browse</span>
                     </label>
-                    <div id="file-name" style="margin-top: 10px; color: var(--accent-color); font-family: var(--font-mono);"></div>
+                    <div class="file-hint">Supports any code file (.py, .js, .java, .php, .go, .c, .cpp, .rs, .sh, etc.)</div>
+                    <div id="file-name" style="margin-top: 15px; color: var(--accent-color); font-family: var(--font-mono); font-weight: 600;"></div>
                 </div>
                 
                 <div class="form-row">
                     <div class="form-group">
                         <label for="mode">ANALYSIS MODE</label>
                         <select id="mode" name="mode">
-                            <option value="ast" {% if not has_providers %}selected{% endif %}>AST Static Analysis (Fast)</option>
+                            <option value="ast" {% if not has_providers %}selected{% endif %}>Static Analysis (AST/Regex)</option>
                             {% if has_providers %}
                             <option value="llm">LLM Deep Analysis</option>
-                            <option value="both" selected>Hybrid (AST + LLM)</option>
+                            <option value="both" selected>Hybrid (Best Coverage)</option>
                             {% endif %}
                         </select>
                     </div>
@@ -471,7 +574,7 @@ HTML_TEMPLATE = """<!doctype html>
         {% elif scanned %}
         <div class="card" style="text-align: center; border-color: var(--success-color);">
             <h3 style="color: var(--success-color); margin-bottom: 10px;">✅ System Secure</h3>
-            <p style="color: var(--text-secondary);">No obvious SQL injection vulnerabilities detected in the scanned file.</p>
+            <p style="color: var(--text-secondary);">No obvious vulnerabilities detected in the scanned file.</p>
         </div>
         {% endif %}
         
@@ -492,6 +595,131 @@ HTML_TEMPLATE = """<!doctype html>
             <p>SECURE CODE SCANNER v2.0 | PROTECT YOUR INFRASTRUCTURE</p>
         </footer>
     </div>
+
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('file');
+        const fileNameDisplay = document.getElementById('file-name');
+        const form = document.getElementById('scanForm');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+
+        // Drag and Drop Events
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight(e) {
+            dropZone.classList.add('dragover');
+        }
+
+        function unhighlight(e) {
+            dropZone.classList.remove('dragover');
+        }
+
+        dropZone.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            
+            if (files.length > 0) {
+                fileInput.files = files;
+                updateFileName(files[0].name);
+            }
+        }
+
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        fileInput.addEventListener('change', function() {
+            if (this.files.length > 0) {
+                updateFileName(this.files[0].name);
+            }
+        });
+
+        function updateFileName(name) {
+            fileNameDisplay.textContent = "Selected: " + name;
+            fileNameDisplay.style.animation = "none";
+            fileNameDisplay.offsetHeight; /* trigger reflow */
+            fileNameDisplay.style.animation = "fadeIn 0.5s";
+        }
+
+        form.addEventListener('submit', function() {
+            if (fileInput.files.length > 0) {
+                loadingOverlay.style.display = 'flex';
+            }
+        });
+
+        // Update mode descriptions based on file type
+        const modeSelect = document.getElementById('mode');
+        const modeOptions = {
+            python: {
+                ast: 'Static Analysis (Python AST)',
+                llm: 'LLM Deep Analysis',
+                both: 'Hybrid (AST + LLM)'
+            },
+            other: {
+                ast: 'Static Analysis (Limited - LLM recommended)',
+                llm: 'LLM Deep Analysis',
+                both: 'LLM Analysis (AST unavailable)'
+            }
+        };
+
+        function updateModeDescriptions(filename) {
+            if (!filename) return;
+            
+            const ext = filename.substring(filename.lastIndexOf('.')).toLowerCase();
+            const isPython = ext === '.py';
+            const options = isPython ? modeOptions.python : modeOptions.other;
+            
+            if (modeSelect) {
+                const astOption = modeSelect.querySelector('option[value="ast"]');
+                const llmOption = modeSelect.querySelector('option[value="llm"]');
+                const bothOption = modeSelect.querySelector('option[value="both"]');
+                
+                if (astOption) astOption.textContent = options.ast;
+                if (llmOption) llmOption.textContent = options.llm;
+                if (bothOption) bothOption.textContent = options.both;
+                
+                // Auto-select LLM for non-Python files if hybrid was selected
+                if (!isPython && modeSelect.value === 'both') {
+                    // Keep 'both' selected - it will just run LLM
+                }
+            }
+        }
+
+        fileInput.addEventListener('change', function() {
+            if (this.files.length > 0) {
+                updateFileName(this.files[0].name);
+                updateModeDescriptions(this.files[0].name);
+            }
+        });
+
+        // Also update on drop
+        const originalHandleDrop = handleDrop;
+        handleDrop = function(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            
+            if (files.length > 0) {
+                fileInput.files = files;
+                updateFileName(files[0].name);
+                updateModeDescriptions(files[0].name);
+            }
+        };
+    </script>
 </body>
 </html>
 """
@@ -513,105 +741,201 @@ def index():
         mode = request.form.get('mode', 'ast')
         provider_name = request.form.get('provider', 'gemini')
         
-        if file and file.filename.endswith('.py'):
-            scanned = True
+        if file:
+            filename = file.filename
+            ext = os.path.splitext(filename)[1].lower()
             
-            # Read uploaded file
-            try:
-                code = file.read().decode('utf-8', errors='ignore')
-            except Exception as e:
-                findings.append({
-                    'file': file.filename,
-                    'line': 0,
-                    'col': 0,
-                    'rule': 'FILE-ERROR',
-                    'message': f'Could not read file: {e}',
-                    'severity': 'Info',
-                    'code': '',
-                    'remediation': '',
-                    'source': 'system'
-                })
-                stats = {'total': 1, 'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
-                return render_template_string(
-                    HTML_TEMPLATE,
-                    findings=findings,
-                    stats=stats,
-                    scanned=scanned,
-                    has_ast=HAS_AST,
-                    has_providers=HAS_PROVIDERS
-                )
-            
-            # Create temp file for AST scanner
-            tmp_path = None
-            try:
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as tmp:
-                    tmp.write(code)
-                    tmp_path = tmp.name
+            # Allow any file - LLM can analyze any code
+            # Only reject binary files or files without extensions
+            if ext and ext != '.exe' and ext != '.dll' and ext != '.so':
+                scanned = True
                 
-                # AST Analysis
-                if mode in ('ast', 'both') and HAS_AST:
-                    try:
-                        result = ast_scan(tmp_path)
-                        for finding in result.get('findings', []):
-                            finding['source'] = 'ast'
-                            finding['file'] = file.filename
-                            findings.append(finding)
-                    except Exception as e:
-                        findings.append({
-                            'file': file.filename,
-                            'line': 0,
-                            'rule': 'AST-ERROR',
-                            'message': f'AST analysis failed: {e}',
-                            'severity': 'Info',
-                            'source': 'ast'
-                        })
+                # Read uploaded file
+                try:
+                    code = file.read().decode('utf-8', errors='ignore')
+                except Exception as e:
+                    findings.append({
+                        'file': filename,
+                        'line': 0,
+                        'col': 0,
+                        'rule': 'FILE-ERROR',
+                        'message': f'Could not read file: {e}',
+                        'severity': 'Info',
+                        'code': '',
+                        'remediation': '',
+                        'source': 'system'
+                    })
+                    stats = {'total': 1, 'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+                    return render_template_string(
+                        HTML_TEMPLATE,
+                        findings=findings,
+                        stats=stats,
+                        scanned=scanned,
+                        has_ast=HAS_AST,
+                        has_providers=HAS_PROVIDERS
+                    )
                 
-                # LLM Analysis
+                
+                # Create temp file for AST scanner
+                tmp_path = None
+                try:
+                    with tempfile.NamedTemporaryFile(mode='w', suffix=ext, delete=False, encoding='utf-8') as tmp:
+                        tmp.write(code)
+                        tmp_path = tmp.name
+                    
+                    # AST Analysis (Python Only)
+                    if mode in ('ast', 'both') and HAS_AST and ext == '.py':
+                        try:
+                            result = ast_scan(tmp_path)
+                            for finding in result.get('findings', []):
+                                finding['source'] = 'ast'
+                                finding['file'] = filename
+                                findings.append(finding)
+                        except Exception as e:
+                            findings.append({
+                                'file': filename,
+                                'line': 0,
+                                'rule': 'AST-ERROR',
+                                'message': f'AST analysis failed: {e}',
+                                'severity': 'Info',
+                                'source': 'ast'
+                            })
+                    elif mode in ('ast', 'both') and ext != '.py':
+                        # Info message for non-Python files
+                        if mode == 'both':
+                            findings.append({
+                                'file': filename,
+                                'line': 0,
+                                'rule': 'INFO',
+                                'message': f'Hybrid mode for {ext} files uses LLM analysis only (Python AST scanner not applicable). For best results with non-Python files, LLM analysis is recommended.',
+                                'severity': 'Info',
+                                'source': 'system'
+                            })
+                        else:
+                            findings.append({
+                                'file': filename,
+                                'line': 0,
+                                'rule': 'INFO',
+                                'message': f'Static AST analysis is only available for Python files. For {ext} files, please use LLM analysis mode.',
+                                'severity': 'Info',
+                                'source': 'system'
+                            })
+                
+                finally:
+                    # Cleanup temp file
+                    if tmp_path and os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+                
+                # LLM Analysis (Multi-language) - Works for ALL file types
                 if mode in ('llm', 'both') and HAS_PROVIDERS:
                     try:
                         provider = load_provider(provider_name)
-                        system = "You are a security expert. Analyze Python code for SQL injection. Output JSON with findings array."
-                        user = f"Analyze this code for SQL injection:\n\n{code}"
+                        
+                        # Dynamic language detection for prompt
+                        lang_map = {
+                            '.py': 'Python', '.js': 'JavaScript', '.ts': 'TypeScript',
+                            '.java': 'Java', '.php': 'PHP', '.go': 'Go',
+                            '.rb': 'Ruby', '.c': 'C', '.cpp': 'C++', '.cs': 'C#',
+                            '.rs': 'Rust', '.swift': 'Swift', '.kt': 'Kotlin',
+                            '.scala': 'Scala', '.sh': 'Bash', '.sql': 'SQL'
+                        }
+                        language = lang_map.get(ext, 'code')
+                        
+                        system = f"You are a security expert. Analyze {language} code for security vulnerabilities including SQL injection, XSS, command injection, path traversal, insecure deserialization, and other common vulnerabilities. Output valid JSON with a 'findings' array containing objects with: rule, message, severity (Critical/High/Medium/Low), line (number), code (snippet), and remediation."
+                        user = f"Analyze this {language} code for security vulnerabilities:\n\n{code}"
                         llm_response = provider.ask(system, user, "")
                         
                         # Try to parse JSON from LLM response
                         import json
                         import re
-                        json_match = re.search(r'\{[\s\S]*\}', llm_response)
-                        if json_match:
+                        
+                        # Try to extract JSON from markdown code blocks first
+                        json_block_match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', llm_response)
+                        if json_block_match:
+                            json_str = json_block_match.group(1)
+                        else:
+                            # Fall back to finding any JSON object
+                            json_match = re.search(r'\{[\s\S]*\}', llm_response)
+                            json_str = json_match.group() if json_match else None
+                        
+                        if json_str:
                             try:
-                                data = json.loads(json_match.group())
-                                for f in data.get('findings', []):
+                                data = json.loads(json_str)
+                                llm_findings = data.get('findings', [])
+                                
+                                if llm_findings:
+                                    for f in llm_findings:
+                                        findings.append({
+                                            'file': filename,
+                                            'line': f.get('line', 0),
+                                            'col': 0,
+                                            'rule': f.get('rule', 'LLM-VULN'),
+                                            'message': f.get('message', ''),
+                                            'severity': f.get('severity', 'Medium'),
+                                            'code': f.get('code', ''),
+                                            'remediation': f.get('remediation', ''),
+                                            'source': 'llm'
+                                        })
+                                else:
+                                    # No findings in JSON, but LLM responded
                                     findings.append({
-                                        'file': file.filename,
-                                        'line': f.get('line', 0),
-                                        'col': 0,
-                                        'rule': f.get('rule', 'LLM-SQLI'),
-                                        'message': f.get('message', ''),
-                                        'severity': f.get('severity', 'Medium'),
-                                        'code': f.get('code', ''),
-                                        'remediation': f.get('remediation', ''),
+                                        'file': filename,
+                                        'line': 0,
+                                        'rule': 'LLM-INFO',
+                                        'message': 'LLM analysis completed. No vulnerabilities detected or response format was unexpected.',
+                                        'severity': 'Info',
                                         'source': 'llm'
                                     })
-                            except json.JSONDecodeError:
-                                pass
+                            except json.JSONDecodeError as je:
+                                # JSON parsing failed - show raw response
+                                findings.append({
+                                    'file': filename,
+                                    'line': 0,
+                                    'rule': 'LLM-PARSE-ERROR',
+                                    'message': f'LLM responded but JSON parsing failed: {str(je)}. Check AI Analysis Log below for raw response.',
+                                    'severity': 'Info',
+                                    'source': 'llm'
+                                })
+                        else:
+                            # No JSON found in response
+                            findings.append({
+                                'file': filename,
+                                'line': 0,
+                                'rule': 'LLM-FORMAT-ERROR',
+                                'message': 'LLM responded but no JSON found. Check AI Analysis Log below for raw response.',
+                                'severity': 'Info',
+                                'source': 'llm'
+                            })
                         
                     except Exception as e:
-                        llm_response = f"LLM Error: {e}\n\nMake sure your API key is set in .env file."
-            
-            finally:
-                # Cleanup temp file
-                if tmp_path and os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
-            
-            # Calculate stats
-            stats = {
-                'total': len(findings),
-                'critical': sum(1 for f in findings if f.get('severity') == 'Critical'),
-                'high': sum(1 for f in findings if f.get('severity') == 'High'),
-                'medium': sum(1 for f in findings if f.get('severity') == 'Medium'),
-                'low': sum(1 for f in findings if f.get('severity') == 'Low'),
-            }
+                        llm_response = f"LLM Error: {e}\n\nMake sure your API key is set as an environment variable.\nFor Gemini: GOOGLE_API_KEY\nFor OpenAI: OPENAI_API_KEY\nFor Claude: ANTHROPIC_API_KEY\nFor Groq: GROQ_KEY"
+                        findings.append({
+                            'file': filename,
+                            'line': 0,
+                            'rule': 'LLM-ERROR',
+                            'message': f'LLM analysis failed: {str(e)}',
+                            'severity': 'Info',
+                            'source': 'llm'
+                        })
+                
+                # Calculate stats
+                stats = {
+                    'total': len(findings),
+                    'critical': sum(1 for f in findings if f.get('severity') == 'Critical'),
+                    'high': sum(1 for f in findings if f.get('severity') == 'High'),
+                    'medium': sum(1 for f in findings if f.get('severity') == 'Medium'),
+                    'low': sum(1 for f in findings if f.get('severity') == 'Low'),
+                }
+            else:
+                findings.append({
+                    'file': filename,
+                    'line': 0,
+                    'rule': 'UNSUPPORTED-FILE',
+                    'message': f'Unsupported file extension: {ext}',
+                    'severity': 'Info',
+                    'source': 'system'
+                })
+                stats = {'total': 1, 'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
     
     return render_template_string(
         HTML_TEMPLATE,
@@ -641,10 +965,10 @@ def health():
 
 if __name__ == '__main__':
     print("=" * 60)
-    print("🔒 SQL Injection Scanner - Web Dashboard")
+    print("[SECURE] SQL Injection Scanner - Web Dashboard")
     print("=" * 60)
-    print(f"AST Scanner: {'✓ Available' if HAS_AST else '✗ Not found'}")
-    print(f"LLM Providers: {'✓ Available' if HAS_PROVIDERS else '✗ Not found'}")
+    print(f"AST Scanner: {'[+] Available' if HAS_AST else '[-] Not found'}")
+    print(f"LLM Providers: {'[+] Available' if HAS_PROVIDERS else '[-] Not found'}")
     print()
     print("Starting server on http://localhost:8000")
     print("Press Ctrl+C to stop")
